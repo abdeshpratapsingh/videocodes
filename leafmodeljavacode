@@ -1,0 +1,204 @@
+public class leafmodel_activity extends AppCompatActivity {
+    private FirebaseModelInterpreter mInterpreter;
+    private FirebaseModelInputOutputOptions mDataOptions;
+    CameraKitView cameraKitView;
+    Button capbtn;
+    Bitmap bitmap;
+    TextView showoutput;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_finger_ml_activity);
+        cameraKitView = findViewById(R.id.camera);
+        capbtn = findViewById(R.id.btn);
+        showoutput = findViewById(R.id.output);
+        capbtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                decode();
+            }
+        });
+        initCustomModel();
+        final ProgressDialog progressDialo = new ProgressDialog(this);
+        progressDialo.setMessage("Please Wait...");
+    }
+
+    private void decode() {
+        cameraKitView.captureImage(new CameraKitView.ImageCallback() {
+            @Override
+            public void onImage(CameraKitView cameraKitView, byte[] bytes) {
+                cameraKitView.onStop();
+
+                bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                addinput(bitmap);
+            }
+        });
+    }
+
+    public void initCustomModel() {
+        int[] inputDims = {1, 224, 224, 3};
+        int[] outputDims = {1, 3};
+
+        try {
+            mDataOptions =
+                    new FirebaseModelInputOutputOptions.Builder()
+                            .setInputFormat(0, FirebaseModelDataType.FLOAT32, inputDims)
+                            .setOutputFormat(0, FirebaseModelDataType.FLOAT32, outputDims)
+                            .build();
+            FirebaseModelDownloadConditions conditions = new FirebaseModelDownloadConditions
+                    .Builder()
+                    .requireWifi()
+                    .build();
+
+            final FirebaseCustomRemoteModel remoteModel = new FirebaseCustomRemoteModel.Builder("leafmodel").build();
+
+
+
+//            final FirebaseCustomLocalModel localModel = new FirebaseCustomLocalModel.Builder()
+//                    .setAssetFilePath("fingernum.tflite")
+//                    .build();
+
+//
+            FirebaseModelManager.getInstance().download(remoteModel, conditions).addOnSuccessListener(new OnSuccessListener<Void>() {
+                @Override
+                public void onSuccess(Void aVoid) {
+
+                    Toast.makeText(leafmodel_activity.this, "downloaded", Toast.LENGTH_SHORT).show();
+
+                }
+            }).addOnFailureListener(new OnFailureListener() {
+                @Override
+                public void onFailure(@NonNull Exception e) {
+                    Toast.makeText(leafmodel_activity.this, e.getMessage(), Toast.LENGTH_SHORT).show();
+
+                }
+            });
+
+
+
+            FirebaseModelManager.getInstance().isModelDownloaded(remoteModel)
+                    .addOnSuccessListener(new OnSuccessListener<Boolean>() {
+                        @Override
+                        public void onSuccess(Boolean isDownloaded) {
+                            FirebaseModelInterpreterOptions options=null ;
+                            if (isDownloaded) {
+                                options = new FirebaseModelInterpreterOptions.Builder(remoteModel).build();
+                            }
+//                            else {
+////                                options = new FirebaseModelInterpreterOptions.Builder(localModel).build();
+//                            }
+                            try {
+                                if (options!=null)
+                                    mInterpreter = FirebaseModelInterpreter.getInstance(options);
+                            } catch (FirebaseMLException e) {
+                                e.printStackTrace();
+                            }
+                            // ...
+                        }
+                    });
+
+        } catch (FirebaseMLException e) {
+            Toast.makeText(leafmodel_activity.this, "Error while setting up the model", Toast.LENGTH_SHORT).show();
+            e.printStackTrace();
+        }
+    }
+
+    private void addinput(Bitmap bitmap) {
+        bitmap = Bitmap.createScaledBitmap(bitmap, 224, 224, true);
+
+        int batchNum = 0;
+        float[][][][] input = new float[1][224][224][3];
+        for (int x = 0; x < 224; x++) {
+            for (int y = 0; y < 224; y++) {
+                int pixel = bitmap.getPixel(x, y);
+                input[batchNum][x][y][0] = (Color.red(pixel) - 127) / 128.0f;
+                input[batchNum][x][y][1] = (Color.green(pixel) - 127) / 128.0f;
+                input[batchNum][x][y][2] = (Color.blue(pixel) - 127) / 128.0f;
+            }
+        }
+
+        try {
+
+            FirebaseModelInputs inputs = new FirebaseModelInputs.Builder()
+                    .add(input)
+                    .build();
+
+            mInterpreter.run(inputs, mDataOptions).addOnSuccessListener(new OnSuccessListener<FirebaseModelOutputs>() {
+                @Override
+                public void onSuccess(FirebaseModelOutputs firebaseModelOutputs) {
+                    float[][] output = firebaseModelOutputs.getOutput(0);
+                    float[] probabilities = output[0];
+                    showoutput(probabilities);
+
+                }
+            }).addOnFailureListener(new OnFailureListener() {
+                @Override
+                public void onFailure(Exception e) {
+                    Toast.makeText(leafmodel_activity.this, e.getMessage(), Toast.LENGTH_SHORT).show();
+
+                }
+            });
+        } catch (FirebaseMLException e) {
+            Toast.makeText(leafmodel_activity.this, e.getMessage(), Toast.LENGTH_SHORT).show();
+
+//            e.printStackTrace();
+        }
+    }
+
+    private void showoutput(float[] probabilities) {
+       int max = (int) probabilities[0];
+       String[] values={"Jackfruit","Moneyplant","Mango"};
+       int pos = 0;
+//        for(int i = 0; i < 3; i++)
+//        {
+//            if(max < probabilities[i])
+//            {
+//                max = (int) probabilities[i];
+//                pos=i;
+//            }
+//        }
+        StringBuilder stringBuilder = new StringBuilder();
+
+        for (float probability : probabilities) {
+            stringBuilder.append(values[pos]+"\t\t"+probability+"\n");
+            pos++;
+        }
+
+        String var =stringBuilder.toString();
+        showoutput.setText(var);
+    }
+
+
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        cameraKitView.onStart();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        cameraKitView.onResume();
+    }
+
+    @Override
+    protected void onPause() {
+        cameraKitView.onPause();
+        super.onPause();
+    }
+
+    @Override
+    protected void onStop() {
+        cameraKitView.onStop();
+        super.onStop();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        cameraKitView.onRequestPermissionsResult(requestCode, permissions, grantResults);
+    }
+
+}
